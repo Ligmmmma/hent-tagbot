@@ -6,7 +6,7 @@ import json
 import os
 
 # -----------------------------
-# CONFIG (READ FROM ENV VARS)
+# CONFIG
 # -----------------------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GUILD_ID = 1462134265360945235
@@ -41,7 +41,7 @@ def grant_cosmetic(playfab_id: str, cosmetic_id: str):
     return response.status_code, response.text
 
 # -----------------------------
-# /claim COMMAND
+# /claim COMMAND (WORKING)
 # -----------------------------
 @tree.command(
     name="claim",
@@ -71,17 +71,19 @@ async def claim(interaction: discord.Interaction, playfab_id: str, cosmetic_id: 
         )
 
 # -----------------------------
-# ON_READY
+# ON_READY (WORKING SYNC)
 # -----------------------------
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
 
+    # Delete old commands
     old_cmds = await tree.fetch_commands(guild=guild)
     for cmd in old_cmds:
         print("Deleting old command:", cmd.name)
         tree.remove_command(cmd.name, type=cmd.type, guild=guild)
 
+    # Sync new commands
     synced = await tree.sync(guild=guild)
     print("SYNCED COMMANDS:", synced)
 
