@@ -89,18 +89,23 @@ async def claim(interaction: discord.Interaction, playfab_id: str, cosmetic_id: 
         )
         return
 
-    # Determine cosmetic based on role
+    # FULL ACCESS → any cosmetic allowed
     if any(r in FULL_ACCESS for r in role_names):
-        # Full access → use whatever they typed
         final_cosmetic = cosmetic_id
 
+    # TRIAL MOD → forced LBATF
     elif TRIAL_MOD in role_names:
-        # Trial mod → forced LBATF
         final_cosmetic = "LBATF"
 
+    # NORMAL STAFF → can ONLY choose LBATQ or LBATF
     else:
-        # All other staff → forced LBATQ
-        final_cosmetic = "LBATQ"
+        if cosmetic_id not in ["LBATQ", "LBATF"]:
+            await interaction.response.send_message(
+                "❌ You can only choose **LBATQ** or **LBATF**.",
+                ephemeral=True
+            )
+            return
+        final_cosmetic = cosmetic_id
 
     await interaction.response.defer(ephemeral=True)
 
