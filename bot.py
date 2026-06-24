@@ -7,9 +7,9 @@ import os
 import asyncio
 from datetime import datetime, timedelta
 
-# -----------------------------
-# CONFIG
-# -----------------------------
+# ============================================================
+# CONFIG (ENV VARS)
+# ============================================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GUILD_ID = 1462134265360945235
 
@@ -19,16 +19,47 @@ PLAYFAB_SECRET = os.getenv("PLAYFAB_SECRET")
 BAN_LOG_FILE = "ban_log.json"
 BAN_STATS_MESSAGE_FILE = "banstats_message.json"
 
-# -----------------------------
+# ============================================================
+# ROLE GROUPS
+# ============================================================
+
+# FULL ACCESS ROLES → can choose ANY cosmetic
+FULL_ACCESS = [
+    "HB | Owners",
+    "Knuckles",
+    "...",
+    "NEPTUNE"
+]
+
+# TRIAL MOD ROLE → forced LBATF
+TRIAL_MOD = "Trial Mod"
+
+# NORMAL STAFF ROLES → can choose LBATQ or LBATF
+NORMAL_STAFF = [
+    "Mod",
+    "Head Mod",
+    "Admin",
+    "Head Admin",
+    "Co Owner",
+    "Founder"
+]
+
+# ALL STAFF (allowed to use /claim)
+STAFF_ROLES = NORMAL_STAFF + FULL_ACCESS + [TRIAL_MOD]
+
+# ============================================================
 # DISCORD SETUP
-# -----------------------------
+# ============================================================
 intents = discord.Intents.default()
+intents.members = True
+intents.guilds = True
+
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
-# -----------------------------
+# ============================================================
 # BAN LOGGING SYSTEM
-# -----------------------------
+# ============================================================
 def load_ban_log():
     if not os.path.exists(BAN_LOG_FILE):
         return []
@@ -56,9 +87,9 @@ def count_bans_by_type(ban_type):
     data = load_ban_log()
     return sum(1 for entry in data if entry.get("type") == ban_type)
 
-# -----------------------------
+# ============================================================
 # BANSTATS MESSAGE STORAGE
-# -----------------------------
+# ============================================================
 def load_banstats_message():
     if not os.path.exists(BAN_STATS_MESSAGE_FILE):
         return None
@@ -69,9 +100,9 @@ def save_banstats_message(data):
     with open(BAN_STATS_MESSAGE_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-# -----------------------------
+# ============================================================
 # BANSTATS AUTO UPDATE LOOP
-# -----------------------------
+# ============================================================
 async def update_banstats_embed():
     await bot.wait_until_ready()
 
@@ -125,9 +156,9 @@ async def update_banstats_embed():
 
         await asyncio.sleep(420)  # 7 minutes
 
-# -----------------------------
+# ============================================================
 # /banstats_setup COMMAND
-# -----------------------------
+# ============================================================
 @tree.command(
     name="banstats_setup",
     description="Create the ban statistics dashboard",
@@ -149,9 +180,9 @@ async def banstats_setup(interaction: discord.Interaction):
 
     await interaction.response.send_message("✅ Ban statistics dashboard created.", ephemeral=True)
 
-# -----------------------------
+# ============================================================
 # PLAYFAB FUNCTION
-# -----------------------------
+# ============================================================
 def grant_cosmetic(playfab_id: str, cosmetic_id: str):
     url = f"https://{PLAYFAB_TITLE_ID}.playfabapi.com/Server/GrantItemsToUser"
 
@@ -168,9 +199,9 @@ def grant_cosmetic(playfab_id: str, cosmetic_id: str):
     response = requests.post(url, headers=headers, data=json.dumps(payload))
     return response.status_code, response.text
 
-# -----------------------------
-# /claim COMMAND (WORKING)
-# -----------------------------
+# ============================================================
+# /claim COMMAND
+# ============================================================
 @tree.command(
     name="claim",
     description="Claim a cosmetic using your PlayFab ID",
@@ -178,18 +209,52 @@ def grant_cosmetic(playfab_id: str, cosmetic_id: str):
 )
 @app_commands.describe(
     playfab_id="Your PlayFab ID",
-    cosmetic_id="The cosmetic item ID to grant"
+    cosmetic_id="The cosmetic item ID to grant (if allowed)"
 )
 async def claim(interaction: discord.Interaction, playfab_id: str, cosmetic_id: str):
-    print("CLAIM COMMAND TRIGGERED")
+    member = interaction.user
+    role_names = [role.name for role in member.roles]
+
+    # BLOCK NON-STAFF
+    if not any(r in STAFF_ROLES for r in role_names):
+        await interaction.response.send_message(
+            "❌ Only staff can use this command.",
+            ephemeral=True
+        )
+        return
+
+    # FULL ACCESS → any cosmetic
+    if any(r in FULL_ACCESS for r in role_names):
+        final_cosmetic = cosmetic_id
+
+    # TRIAL MOD → LBATF only
+    elif TRIAL_MOD in role_names:
+        final_cosmetic = "LBATF"
+
+    # NORMAL STAFF → LBATQ or LBATF only
+    elif any(r in NORMAL_STAFF for r in role_names):
+        if cosmetic_id not in ["LBATQ", "LBATF"]:
+            await interaction.response.send_message(
+                "❌ You can only choose **LBATQ** or **LBATF**.",
+                ephemeral=True
+            )
+            return
+        final_cosmetic = cosmetic_id
+
+    else:
+        await interaction.response.send_message(
+            "❌ Unexpected role error. Contact the owner.",
+            ephemeral=True
+        )
+        return
 
     await interaction.response.defer(ephemeral=True)
 
-    status, text = grant_cosmetic(playfab_id, cosmetic_id)
+    status, text = grant_cosmetic(playfab_id, final_cosmetic)
 
     if status == 200:
         await interaction.followup.send(
-            f"✅ Granted **{cosmetic_id}** to **{playfab_id}**",
+            f"✅ Granted **{final_cosmetic}** to **{playfab_id}**",
             ephemeral=True
         )
     else:
@@ -198,26 +263,19 @@ async def claim(interaction: discord.Interaction, playfab_id: str, cosmetic_id: 
             ephemeral=True
         )
 
-# -----------------------------
-# ON_READY (WORKING SYNC)
-# -----------------------------
+# ============================================================
+# ON_READY
+# ============================================================
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
-
-    old_cmds = await tree.fetch_commands(guild=guild)
-    for cmd in old_cmds:
-        print("Deleting old command:", cmd.name)
-        tree.remove_command(cmd.name, type=cmd.type, guild=guild)
-
     synced = await tree.sync(guild=guild)
-    print("SYNCED COMMANDS:", synced)
-
+    print("SYNCED COMMANDS:", [cmd.name for cmd in synced])
     print(f"Logged in as {bot.user}")
 
     bot.loop.create_task(update_banstats_embed())
 
-# -----------------------------
+# ============================================================
 # RUN BOT
-# -----------------------------
+# ============================================================
 bot.run(BOT_TOKEN)
