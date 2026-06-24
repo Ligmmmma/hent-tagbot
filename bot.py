@@ -20,11 +20,29 @@ FULL_ACCESS = ["HB | Owners", "Knuckles", "...", "NEPTUNE"]
 # TRIAL MOD ROLE (forced LBATF)
 TRIAL_MOD = "Trial Mod"
 
+# ALL STAFF ROLES (allowed to use /claim)
+STAFF_ROLES = [
+    "Trial Mod",
+    "Moderator",
+    "Head Mod",
+    "Admin",
+    "Head Admin",
+    "Co-Owner",
+    "Founder",
+    "Another Axiom",
+    "HB | Owners",
+    "Knuckles",
+    "...",
+    "NEPTUNE"
+]
+
 # -----------------------------
 # DISCORD SETUP
 # -----------------------------
 intents = discord.Intents.default()
 intents.members = True
+intents.guilds = True
+
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
@@ -62,6 +80,14 @@ def grant_cosmetic(playfab_id: str, cosmetic_id: str):
 async def claim(interaction: discord.Interaction, playfab_id: str, cosmetic_id: str):
     member = interaction.user
     role_names = [role.name for role in member.roles]
+
+    # Block non-staff completely
+    if not any(r in STAFF_ROLES for r in role_names):
+        await interaction.response.send_message(
+            "❌ Only staff can use this command.",
+            ephemeral=True
+        )
+        return
 
     # Determine cosmetic based on role
     if any(r in FULL_ACCESS for r in role_names):
