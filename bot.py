@@ -7,8 +7,11 @@ import os
 import asyncio
 from datetime import datetime, timedelta
 
+from flask import Flask, request
+import threading
+
 # ============================================================
-# CONFIG (ENV VARS)
+# CONFIG
 # ============================================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GUILD_ID = 1462134265360945235
@@ -22,29 +25,9 @@ BAN_STATS_MESSAGE_FILE = "banstats_message.json"
 # ============================================================
 # ROLE GROUPS
 # ============================================================
-
-# FULL ACCESS ROLES → can choose ANY cosmetic
-FULL_ACCESS = [
-    "HB | Owners",
-    "Knuckles",
-    "...",
-    "NEPTUNE"
-]
-
-# TRIAL MOD ROLE → forced LBATF
+FULL_ACCESS = ["HB | Owners", "Knuckles", "...", "NEPTUNE"]
 TRIAL_MOD = "Trial Mod"
-
-# NORMAL STAFF ROLES → can choose LBATQ or LBATF
-NORMAL_STAFF = [
-    "Mod",
-    "Head Mod",
-    "Admin",
-    "Head Admin",
-    "Co Owner",
-    "Founder"
-]
-
-# ALL STAFF (allowed to use /claim)
+NORMAL_STAFF = ["Mod", "Head Mod", "Admin", "Head Admin", "Co Owner", "Founder"]
 STAFF_ROLES = NORMAL_STAFF + FULL_ACCESS + [TRIAL_MOD]
 
 # ============================================================
@@ -58,7 +41,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
 # ============================================================
-# BAN LOGGING SYSTEM
+# BAN LOGGING
 # ============================================================
 def load_ban_log():
     if not os.path.exists(BAN_LOG_FILE):
@@ -101,16 +84,17 @@ def save_banstats_message(data):
         json.dump(data, f, indent=4)
 
 # ============================================================
-# BANSTATS AUTO UPDATE LOOP
+# BANSTATS AUTO UPDATE
 # ============================================================
 async def update_banstats_embed():
     await bot.wait_until_ready()
+    first_run = True
 
     while True:
         try:
             msg_info = load_banstats_message()
             if not msg_info:
-                await asyncio.sleep(420)
+                await asyncio.sleep(10)
                 continue
 
             channel = bot.get_channel(msg_info["channel_id"])
@@ -128,15 +112,10 @@ async def update_banstats_embed():
             spam_bans = count_bans_by_type("spam")
             player_bans = count_bans_by_type("player")
 
-            embed = discord.Embed(
-                title="📊 Ban Statistics",
-                color=0x00AEEF
-            )
-
+            embed = discord.Embed(title="📊 Ban Statistics", color=0x00AEEF)
             embed.add_field(name="Total Bans", value=f"`{total_bans}`", inline=False)
             embed.add_field(name="Bans Today", value=f"`{bans_today}`", inline=True)
             embed.add_field(name="Bans Yesterday", value=f"`{bans_yesterday}`", inline=True)
-
             embed.add_field(
                 name="Banned By...",
                 value=(
@@ -146,7 +125,6 @@ async def update_banstats_embed():
                 ),
                 inline=False
             )
-
             embed.set_footer(text="Updates every 7 minutes")
 
             await message.edit(embed=embed)
@@ -154,10 +132,11 @@ async def update_banstats_embed():
         except Exception as e:
             print("Error updating banstats:", e)
 
-        await asyncio.sleep(420)  # 7 minutes
+        await asyncio.sleep(10 if first_run else 420)
+        first_run = False
 
 # ============================================================
-# /banstats_setup COMMAND
+# /banstats_setup
 # ============================================================
 @tree.command(
     name="banstats_setup",
@@ -170,37 +149,44 @@ async def banstats_setup(interaction: discord.Interaction):
         description="Initializing...",
         color=0x00AEEF
     )
-
     msg = await interaction.channel.send(embed=embed)
-
-    save_banstats_message({
-        "channel_id": interaction.channel.id,
-        "message_id": msg.id
-    })
-
+    save_banstats_message({"channel_id": interaction.channel.id, "message_id": msg.id})
     await interaction.response.send_message("✅ Ban statistics dashboard created.", ephemeral=True)
+
+# ============================================================
+# WEBHOOK SERVER (CloudScript → bot)
+# ============================================================
+app = Flask(__name__)
+
+@app.route("/banwebhook", methods=["POST"])
+def ban_webhook():
+    data = request.json
+    playfab_id = data.get("playfab_id")
+    ban_type = data.get("type", "staff")
+    if playfab_id:
+        log_ban(playfab_id, ban_type)
+    return "OK", 200
+
+def run_flask():
+    app.run(host="0.0.0.0", port=8080)
+
+threading.Thread(target=run_flask).start()
 
 # ============================================================
 # PLAYFAB FUNCTION
 # ============================================================
 def grant_cosmetic(playfab_id: str, cosmetic_id: str):
     url = f"https://{PLAYFAB_TITLE_ID}.playfabapi.com/Server/GrantItemsToUser"
-
     headers = {
         "Content-Type": "application/json",
         "X-SecretKey": PLAYFAB_SECRET
     }
-
-    payload = {
-        "PlayFabId": playfab_id,
-        "ItemIds": [cosmetic_id]
-    }
-
+    payload = {"PlayFabId": playfab_id, "ItemIds": [cosmetic_id]}
     response = requests.post(url, headers=headers, data=json.dumps(payload))
     return response.status_code, response.text
 
 # ============================================================
-# /claim COMMAND
+# /claim
 # ============================================================
 @tree.command(
     name="claim",
@@ -215,48 +201,28 @@ async def claim(interaction: discord.Interaction, playfab_id: str, cosmetic_id: 
     member = interaction.user
     role_names = [role.name for role in member.roles]
 
-    # BLOCK NON-STAFF
     if not any(r in STAFF_ROLES for r in role_names):
-        await interaction.response.send_message(
-            "❌ Only staff can use this command.",
-            ephemeral=True
-        )
+        await interaction.response.send_message("❌ Only staff can use this command.", ephemeral=True)
         return
 
-    # FULL ACCESS → any cosmetic
     if any(r in FULL_ACCESS for r in role_names):
         final_cosmetic = cosmetic_id
-
-    # TRIAL MOD → LBATF only
     elif TRIAL_MOD in role_names:
         final_cosmetic = "LBATF"
-
-    # NORMAL STAFF → LBATQ or LBATF only
     elif any(r in NORMAL_STAFF for r in role_names):
         if cosmetic_id not in ["LBATQ", "LBATF"]:
-            await interaction.response.send_message(
-                "❌ You can only choose **LBATQ** or **LBATF**.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("❌ You can only choose LBATQ or LBATF.", ephemeral=True)
             return
         final_cosmetic = cosmetic_id
-
     else:
-        await interaction.response.send_message(
-            "❌ Unexpected role error. Contact the owner.",
-            ephemeral=True
-        )
+        await interaction.response.send_message("❌ Unexpected role error.", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
-
     status, text = grant_cosmetic(playfab_id, final_cosmetic)
 
     if status == 200:
-        await interaction.followup.send(
-            f"✅ Granted **{final_cosmetic}** to **{playfab_id}**",
-            ephemeral=True
-        )
+        await interaction.followup.send(f"✅ Granted **{final_cosmetic}** to **{playfab_id}**", ephemeral=True)
     else:
         await interaction.followup.send(
             f"❌ PlayFab error\n\n**Status:** {status}\n**Response:** {text}",
@@ -272,7 +238,6 @@ async def on_ready():
     synced = await tree.sync(guild=guild)
     print("SYNCED COMMANDS:", [cmd.name for cmd in synced])
     print(f"Logged in as {bot.user}")
-
     bot.loop.create_task(update_banstats_embed())
 
 # ============================================================
