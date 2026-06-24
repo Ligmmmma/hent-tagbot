@@ -5,40 +5,46 @@ import requests
 import json
 import os
 
-# -----------------------------
+# ============================================================
 # CONFIG (ENV VARS)
-# -----------------------------
+# ============================================================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GUILD_ID = 1462134265360945235
 
 PLAYFAB_TITLE_ID = os.getenv("PLAYFAB_TITLE_ID")
 PLAYFAB_SECRET = os.getenv("PLAYFAB_SECRET")
 
-# FULL ACCESS ROLES (can choose ANY cosmetic)
-FULL_ACCESS = ["HB | Owners", "Knuckles", "...", "NEPTUNE"]
+# ============================================================
+# ROLE GROUPS
+# ============================================================
 
-# TRIAL MOD ROLE (forced LBATF)
-TRIAL_MOD = "Trial Mod"
-
-# ALL STAFF ROLES (allowed to use /claim)
-STAFF_ROLES = [
-    "Trial Mod",
-    "Moderator",
-    "Head Mod",
-    "Admin",
-    "Head Admin",
-    "Co-Owner",
-    "Founder",
-    "Another Axiom",
+# FULL ACCESS ROLES → can choose ANY cosmetic
+FULL_ACCESS = [
     "HB | Owners",
     "Knuckles",
     "...",
     "NEPTUNE"
 ]
 
-# -----------------------------
+# TRIAL MOD ROLE → forced LBATF
+TRIAL_MOD = "Trial Mod"
+
+# NORMAL STAFF ROLES → can choose LBATQ or LBATF
+NORMAL_STAFF = [
+    "Mod",
+    "Head Mod",
+    "Admin",
+    "Head Admin",
+    "Co Owner",
+    "Founder"
+]
+
+# ALL STAFF (allowed to use /claim)
+STAFF_ROLES = NORMAL_STAFF + FULL_ACCESS + [TRIAL_MOD]
+
+# ============================================================
 # DISCORD SETUP
-# -----------------------------
+# ============================================================
 intents = discord.Intents.default()
 intents.members = True
 intents.guilds = True
@@ -46,9 +52,9 @@ intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
-# -----------------------------
+# ============================================================
 # PLAYFAB FUNCTION
-# -----------------------------
+# ============================================================
 def grant_cosmetic(playfab_id: str, cosmetic_id: str):
     url = f"https://{PLAYFAB_TITLE_ID}.playfabapi.com/Server/GrantItemsToUser"
 
@@ -65,9 +71,9 @@ def grant_cosmetic(playfab_id: str, cosmetic_id: str):
     response = requests.post(url, headers=headers, data=json.dumps(payload))
     return response.status_code, response.text
 
-# -----------------------------
+# ============================================================
 # /claim COMMAND
-# -----------------------------
+# ============================================================
 @tree.command(
     name="claim",
     description="Claim a cosmetic using your PlayFab ID",
@@ -81,7 +87,9 @@ async def claim(interaction: discord.Interaction, playfab_id: str, cosmetic_id: 
     member = interaction.user
     role_names = [role.name for role in member.roles]
 
-    # Block non-staff completely
+    # -----------------------------
+    # BLOCK NON-STAFF COMPLETELY
+    # -----------------------------
     if not any(r in STAFF_ROLES for r in role_names):
         await interaction.response.send_message(
             "❌ Only staff can use this command.",
@@ -89,16 +97,22 @@ async def claim(interaction: discord.Interaction, playfab_id: str, cosmetic_id: 
         )
         return
 
-    # FULL ACCESS → any cosmetic allowed
+    # -----------------------------
+    # FULL ACCESS ROLES → ANY cosmetic
+    # -----------------------------
     if any(r in FULL_ACCESS for r in role_names):
         final_cosmetic = cosmetic_id
 
-    # TRIAL MOD → forced LBATF
+    # -----------------------------
+    # TRIAL MOD → LBATF ONLY
+    # -----------------------------
     elif TRIAL_MOD in role_names:
         final_cosmetic = "LBATF"
 
-    # NORMAL STAFF → can ONLY choose LBATQ or LBATF
-    else:
+    # -----------------------------
+    # NORMAL STAFF → LBATQ or LBATF ONLY
+    # -----------------------------
+    elif any(r in NORMAL_STAFF for r in role_names):
         if cosmetic_id not in ["LBATQ", "LBATF"]:
             await interaction.response.send_message(
                 "❌ You can only choose **LBATQ** or **LBATF**.",
@@ -107,6 +121,19 @@ async def claim(interaction: discord.Interaction, playfab_id: str, cosmetic_id: 
             return
         final_cosmetic = cosmetic_id
 
+    # -----------------------------
+    # SAFETY CATCH
+    # -----------------------------
+    else:
+        await interaction.response.send_message(
+            "❌ Unexpected role error. Contact the owner.",
+            ephemeral=True
+        )
+        return
+
+    # -----------------------------
+    # GRANT COSMETIC
+    # -----------------------------
     await interaction.response.defer(ephemeral=True)
 
     status, text = grant_cosmetic(playfab_id, final_cosmetic)
@@ -122,9 +149,9 @@ async def claim(interaction: discord.Interaction, playfab_id: str, cosmetic_id: 
             ephemeral=True
         )
 
-# -----------------------------
+# ============================================================
 # ON_READY
-# -----------------------------
+# ============================================================
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
@@ -132,7 +159,7 @@ async def on_ready():
     print("SYNCED COMMANDS:", [cmd.name for cmd in synced])
     print(f"Logged in as {bot.user}")
 
-# -----------------------------
+# ============================================================
 # RUN BOT
-# -----------------------------
+# ============================================================
 bot.run(BOT_TOKEN)
